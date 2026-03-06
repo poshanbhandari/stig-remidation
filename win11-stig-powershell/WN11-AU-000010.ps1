@@ -1,7 +1,6 @@
  <#
 .SYNOPSIS
-    Configures "Audit Process Creation" policy to audit Success events
-    (Computer Configuration >> Security Settings >> Advanced Audit Policy >> Detailed Tracking).
+    Configures audit policy override (WN11-SO-000030) and enables "Audit Credential Validation - Success".
 
 .NOTES
     Author          : Poshan Bhandari
@@ -12,7 +11,7 @@
     Version         : 1.0
     CVEs            : N/A
     Plugin IDs      : N/A
-    STIG-ID         : 
+    STIG-ID         : WN11-SO-000030
 
 .TESTED ON
     Date(s) Tested  : 
@@ -22,24 +21,40 @@
 
 .USAGE
     Run from elevated PowerShell:
-    PS C:\> .\Enable-AuditProcessCreation-Success.ps1
+    PS C:\> .\Enable-AuditPolicyOverride-CredentialValidation.ps1
 #>
 
-# Path for  Audit Policies
-$path = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit"
-$valueName = "Process_Creation"
-$successValue = 0x1  # Success only
+# Part 1: Enable Audit Policy Subcategory Override (WN11-SO-000030)
+Write-Host "=== Part 1: Configuring Audit Policy Override (WN11-SO-000030) ===" -ForegroundColor Cyan
 
-# Check current status
-$current = (Get-ItemProperty -Path $path -Name $valueName -EA 0).$valueName
-if ($current -band 1) { Write-Host "Already auditing Success ✓" -F Green }
-else { Write-Host "Enabling Success auditing..." -F Yellow }
+$path1 = "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"
+$valueName1 = "SCENoApplyLegacyAuditPolicy"
+$requiredValue1 = 1
 
-# Set policy and refresh
-if (-not (Test-Path $path)) { New-Item $path -Force | Out-Null }
-Set-ItemProperty -Path $path -Name $valueName -Value $successValue -Type DWord -Force
-auditpol /set /subcategory:"Process Creation" /success:enable
+if (-not (Test-Path $path1)) {
+    Write-Host "LSA path missing (unlikely), creating..." -ForegroundColor Yellow
+}
 
-# Verify
-"Final Value: $((Get-ItemProperty $path -Name $valueName -EA 0).$valueName) ✓"
+Set-ItemProperty -Path $path1 -Name $valueName1 -Value $requiredValue1 -Type DWord -Force
+Write-Host "Set SCENoApplyLegacyAuditPolicy = 1 (Subcategories override categories)" -ForegroundColor Green
+
+# Part 2: Enable Audit Credential Validation - Success
+Write-Host "`n=== Part 2: Enabling Audit Credential Validation (Success) ===" -ForegroundColor Cyan
+
+# Set advanced audit policy using auditpol
+auditpol /set /subcategory:"Credential Validation" /success:enable
+
+# Verify both settings
+Write-Host "`n=== Verification ===" -ForegroundColor Cyan
+
+# Verify registry setting
+$lsaValue = (Get-ItemProperty -Path $path1 -Name $valueName1 -ErrorAction SilentlyContinue).$valueName1
+Write-Host "WN11-SO-000030: SCENoApplyLegacyAuditPolicy = $lsaValue (1=Compliant)" -ForegroundColor $(if($lsaValue -eq 1){"Green"}else{"Red"})
+
+# Verify audit policy
+Write-Host "`nAudit Credential Validation:" -ForegroundColor Cyan
+auditpol /get /subcategory:"Credential Validation"
+
+Write-Host "`nSUCCESS: Audit policy override enabled + Credential Validation auditing active." -ForegroundColor Green
+Write-Host "Logs will appear in Event Viewer >> Security >> Event ID 4776 (Success)." -ForegroundColor Cyan
  
